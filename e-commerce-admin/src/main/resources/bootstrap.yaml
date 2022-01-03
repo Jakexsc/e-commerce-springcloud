@@ -1,0 +1,35 @@
+server:
+  servlet:
+    context-path: /e-commerce-admin
+  port: 7001
+
+spring:
+  application:
+    name: e-commerce-admin
+  security:
+    user:
+      name: xsc
+      password: chen-2964
+  cloud:
+    nacos:
+      discovery:
+        namespace: a9eb0a9a-82f4-4c1e-b3b4-3c00ccae9351
+        enabled: true
+        server-addr: 127.0.0.1:8848
+        metadata:
+          management:
+            context-path: ${server.servlet.context-path}/actuator
+          user.name: xsc
+          user.password: chen-2964
+  thymeleaf:
+    check-template: false
+    check-template-location: false
+
+management:
+  endpoint:
+    health:
+      show-details: always
+  endpoints:
+    web:
+      exposure:
+        include: '*'

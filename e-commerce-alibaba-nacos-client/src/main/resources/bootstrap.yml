@@ -1,0 +1,26 @@
+server:
+  port: 8000
+  servlet:
+    context-path: /ecommerce-nacos-client
+
+spring:
+  application:
+    name: e-commerce-alibaba-nacos-client
+  cloud:
+    nacos:
+      discovery:
+        enabled: true
+        server-addr: 127.0.0.1:8848
+        namespace: a9eb0a9a-82f4-4c1e-b3b4-3c00ccae9351
+        metadata:
+          management:
+            context-path: ${server.servlet.context-path}/actuator
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  endpoint:
+    health:
+      show-details: always
