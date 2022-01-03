@@ -15,6 +15,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
+ * 将登录、注册的请求内容进行包装
+ *
  * @author Jakexsc
  * 2022/1/3
  */

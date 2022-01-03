@@ -9,9 +9,9 @@ public class GatewayConstant {
 
     public static final String REGISTER_URI = "/e-commerce/register";
 
-    public static final String AUTHORITY_CENTER_TOKEN_URI =
+    public static final String AUTHORITY_CENTER_TOKEN_URI_FORMAT =
             "http://%s:%s/ecommerce-authority-center/authority/token";
 
-    public static final String AUTHORITY_CENTER_REGISTER_URI =
+    public static final String AUTHORITY_CENTER_REGISTER_URI_FORMAT =
             "http://%s:%s/ecommerce-authority-center/authority/register";
 }
