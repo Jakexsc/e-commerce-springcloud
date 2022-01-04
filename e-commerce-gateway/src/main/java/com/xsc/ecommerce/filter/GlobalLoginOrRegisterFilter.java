@@ -7,12 +7,14 @@ import com.xsc.ecommerce.util.TokenParseUtil;
 import com.xsc.ecommerce.vo.JwtToken;
 import com.xsc.ecommerce.vo.LoginUserInfo;
 import com.xsc.ecommerce.vo.UsernameAndPassword;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.loadbalancer.LoadBalancerClient;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -37,62 +39,83 @@ import java.util.concurrent.atomic.AtomicReference;
  * @author Jakexsc
  * 2022/1/3
  */
+/**
+ * <h1>全局登录鉴权过滤器</h1>
+ * */
+@Slf4j
 @Component
-public class GlobalLoginOrRegisterFilter implements GatewayFilter, Ordered {
-    private static final Logger LOG = LoggerFactory.getLogger(GlobalLoginOrRegisterFilter.class);
+public class GlobalLoginOrRegisterFilter implements GlobalFilter, Ordered {
 
-    @Resource
-    private RestTemplate restTemplate;
-    /**
-     * 从注册中心获取客户端信息
-     */
-    @Resource
-    private LoadBalancerClient loadBalancerClient;
+    /** 注册中心客户端, 可以从注册中心中获取服务实例信息 */
+    private final LoadBalancerClient loadBalancerClient;
+    private final RestTemplate restTemplate;
+
+    public GlobalLoginOrRegisterFilter(LoadBalancerClient loadBalancerClient,
+                                       RestTemplate restTemplate) {
+        this.loadBalancerClient = loadBalancerClient;
+        this.restTemplate = restTemplate;
+    }
 
     /**
-     * 登录，注册，鉴权
-     * 1.如果是登录或注册,则去授权中心拿到token并返回给客户端
-     * 2.如果是访问其他的服务,则鉴权，没有权限则返回401
-     */
+     * <h2>登录、注册、鉴权</h2>
+     * 1. 如果是登录或注册, 则去授权中心拿到 Token 并返回给客户端
+     * 2. 如果是访问其他的服务, 则鉴权, 没有权限返回 401
+     * */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+
         ServerHttpRequest request = exchange.getRequest();
         ServerHttpResponse response = exchange.getResponse();
-        // 1.如果是登录
-        String path = request.getURI().getPath();
-        if (path.contains(GatewayConstant.LOGIN_URI)) {
-            String token = getTokenFromAuthorityCenter(request, GatewayConstant.AUTHORITY_CENTER_TOKEN_URI_FORMAT);
-            return setResponse(response, token);
+
+        // 1. 如果是登录
+        if (request.getURI().getPath().contains(GatewayConstant.LOGIN_URI)) {
+            // 去授权中心拿 token
+            String token = getTokenFromAuthorityCenter(
+                    request, GatewayConstant.AUTHORITY_CENTER_TOKEN_URI_FORMAT
+            );
+            // header 中不能设置 null
+            response.getHeaders().add(
+                    CommonConstant.JWT_USER_INFO_KEY,
+                    null == token ? "null" : token
+            );
+            response.setStatusCode(HttpStatus.OK);
+            return response.setComplete();
         }
 
-        // 2.如果是注册
-        if (path.contains(GatewayConstant.REGISTER_URI)) {
-            String token = getTokenFromAuthorityCenter(request, GatewayConstant.AUTHORITY_CENTER_REGISTER_URI_FORMAT);
-            return setResponse(response, token);
+        // 2. 如果是注册
+        if (request.getURI().getPath().contains(GatewayConstant.REGISTER_URI)) {
+            // 去授权中心拿 token: 先创建用户, 再返回 Token
+            String token = getTokenFromAuthorityCenter(
+                    request,
+                    GatewayConstant.AUTHORITY_CENTER_REGISTER_URI_FORMAT
+            );
+            response.getHeaders().add(
+                    CommonConstant.JWT_USER_INFO_KEY,
+                    null == token ? "null" : token
+            );
+            response.setStatusCode(HttpStatus.OK);
+            return response.setComplete();
         }
 
-        // 3.访问其他的服务，则鉴权，校验是否能够从token解析出用户的信息
+        // 3. 访问其他的服务, 则鉴权, 校验是否能够从 Token 中解析出用户信息
         HttpHeaders headers = request.getHeaders();
         String token = headers.getFirst(CommonConstant.JWT_USER_INFO_KEY);
-        LoginUserInfo loginUserInfo;
+        LoginUserInfo loginUserInfo = null;
 
         try {
             loginUserInfo = TokenParseUtil.parseUserInfoFromToken(token);
-            if (loginUserInfo == null) {
-                response.setStatusCode(HttpStatus.UNAUTHORIZED);
-                return response.setComplete();
-            }
-        } catch (Exception e) {
-            LOG.error("parse token error: [{}]", e.getMessage(), e);
+        } catch (Exception ex) {
+            log.error("parse user info from token error: [{}]", ex.getMessage(), ex);
         }
 
-        return chain.filter(exchange);
-    }
+        // 获取不到登录用户信息, 返回 401
+        if (null == loginUserInfo) {
+            response.setStatusCode(HttpStatus.UNAUTHORIZED);
+            return response.setComplete();
+        }
 
-    private Mono<Void> setResponse(ServerHttpResponse response, String token) {
-        response.getHeaders().add(CommonConstant.JWT_USER_INFO_KEY, null == token ? "null" : token);
-        response.setStatusCode(HttpStatus.OK);
-        return response.setComplete();
+        // 解析通过, 则放行
+        return chain.filter(exchange);
     }
 
     @Override
@@ -101,51 +124,61 @@ public class GlobalLoginOrRegisterFilter implements GatewayFilter, Ordered {
     }
 
     /**
-     * 从授权中心获取token
-     *
-     * @param request
-     * @param uriFormat
-     * @return String
-     */
+     * <h2>从授权中心获取 Token</h2>
+     * */
     private String getTokenFromAuthorityCenter(ServerHttpRequest request, String uriFormat) {
-        // 负载均衡获取服务实例信息
-        ServiceInstance serviceInstance = loadBalancerClient.choose(CommonConstant.AUTHORITY_CENTER_SERVER_ID);
-        LOG.info("Nacos client info: [{}], [{}], [{}]",
-                serviceInstance.getServiceId(),
-                serviceInstance.getInstanceId(),
+
+        // service id 就是服务名字, 负载均衡
+        ServiceInstance serviceInstance = loadBalancerClient.choose(
+                CommonConstant.AUTHORITY_CENTER_SERVER_ID
+        );
+        log.info("Nacos Client Info: [{}], [{}], [{}]",
+                serviceInstance.getServiceId(), serviceInstance.getInstanceId(),
                 JSON.toJSONString(serviceInstance.getMetadata()));
-        String requestUrl = String.format(uriFormat, serviceInstance.getHost(), serviceInstance.getPort());
-        UsernameAndPassword requestBody = JSON.parseObject(parseBodyFromRequest(request),
-                UsernameAndPassword.class);
-        LOG.info("request Url and Body: [{}], [{}]", requestUrl, JSON.toJSONString(requestBody));
+
+        String requestUrl = String.format(
+                uriFormat, serviceInstance.getHost(), serviceInstance.getPort()
+        );
+        UsernameAndPassword requestBody = JSON.parseObject(
+                parseBodyFromRequest(request), UsernameAndPassword.class
+        );
+        log.info("login request url and body: [{}], [{}]", requestUrl,
+                JSON.toJSONString(requestBody));
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        JwtToken token = restTemplate.postForObject(requestUrl,
+        JwtToken token = restTemplate.postForObject(
+                requestUrl,
                 new HttpEntity<>(JSON.toJSONString(requestBody), headers),
-                JwtToken.class);
+                JwtToken.class
+        );
+
         if (null != token) {
             return token.getToken();
         }
+
         return null;
     }
 
     /**
-     * 解析body的数据
-     *
-     * @param request
-     * @return String
-     */
+     * <h2>从 Post 请求中获取到请求数据</h2>
+     * */
     private String parseBodyFromRequest(ServerHttpRequest request) {
+
+        // 获取请求体
         Flux<DataBuffer> body = request.getBody();
         AtomicReference<String> bodyRef = new AtomicReference<>();
+
         // 订阅缓冲区去消费请求体中的数据
         body.subscribe(buffer -> {
             CharBuffer charBuffer = StandardCharsets.UTF_8.decode(buffer.asByteBuffer());
-            // 将缓存的body的数据release掉 否则会内存泄漏
+            // 一定要使用 DataBufferUtils.release 释放掉, 否则, 会出现内存泄露
             DataBufferUtils.release(buffer);
             bodyRef.set(charBuffer.toString());
         });
+
+        // 获取 request body
         return bodyRef.get();
     }
 }
+

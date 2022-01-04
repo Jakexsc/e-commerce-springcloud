@@ -14,7 +14,7 @@ import reactor.core.publisher.Mono;
  * @author Jakexsc
  * 2021/12/30
  */
-public class HeaderTokenFilter implements GatewayFilter, Ordered {
+public class HeaderTokenGatewayFilter implements GatewayFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String name = exchange.getRequest().getHeaders().getFirst("token");
