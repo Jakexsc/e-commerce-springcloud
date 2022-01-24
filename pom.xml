@@ -10,6 +10,7 @@
         <module>e-commerce-alibaba-nacos-client</module>
         <module>e-commerce-admin</module>
         <module>e-commerce-gateway</module>
+        <module>e-commerce-strem</module>
     </modules>
 
     <parent>
