@@ -25,6 +25,10 @@ public class NacosClientService {
      * @param serviceId
      */
     public List<ServiceInstance> getNacosClientInfoById(String serviceId) {
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+        }
         return discoveryClient.getInstances(serviceId);
     }
 }
